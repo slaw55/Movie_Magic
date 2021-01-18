@@ -1,6 +1,6 @@
-import threading
 import selectors
 import socket
+import time
 
 class Client:
     def __init__(self):
@@ -9,15 +9,23 @@ class Client:
         # self.host, self.port = "173.79.60.161", 10000
         self.host, self.port = "127.0.0.1", 10000
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.start_connection()
 
     def start_connection(self):
         addr = (self.host, self.port)
-        print("starting connection to", addr)
         self.sock.setblocking(False)
         self.sock.connect_ex(addr)
-        events = selectors.EVENT_READ
-        self.sel.register(self.sock, events, data=None)
+        time.sleep(1)
+        try:
+            data = 'j'
+            self.sock.sendall(data.encode('utf-8'))
+            events = selectors.EVENT_READ
+            self.sel.register(self.sock, events, data=None)
+            return True
+        except:
+            print('Failed to join server')
+            return False
+
+
 
     def sock_listener(self, progress_callback):
         print('listening to server')
@@ -35,6 +43,8 @@ class Client:
                     print('closing', key.fileobj)
                     self.sel.unregister(key.fileobj)
                     self.sock.close()
+                    passback = ('q','00000')
+                    progress_callback.emit(passback)
                     break
         except KeyboardInterrupt:
             print("caught keyboard interrupt, exiting")

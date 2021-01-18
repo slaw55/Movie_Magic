@@ -32,7 +32,10 @@ class Server:
     def read(self, conn, mask):
         header = conn.recv(1)  # Should be ready
         if header:
-            if header.decode('utf-8') == 'p':
+            if header.decode('utf-8') == 'j':
+                self.j_fn()
+                return
+            elif header.decode('utf-8') == 'p':
                 self.playpause = not self.playpause
                 payload = self.p_fn()
             elif header.decode('utf-8') == 't':
@@ -65,6 +68,9 @@ class Server:
             print("caught keyboard interrupt, exiting")
         finally:
             self.sel.close()
+
+    def j_fn(self):
+        print('Client joined')
 
     def p_fn(self):
         if self.playpause:

@@ -44,15 +44,11 @@ class Player(QWidget):
 
         self.videoWidget = QVideoWidget()
 
-        # self.create_ui()
-
-
 
     def create_ui(self):
         # Set up GUI
 
         # Creates GUI widget
-
         layout = QHBoxLayout()
         layout.addWidget(self.videoWidget)
         layout.setContentsMargins(0,0,0,0)
@@ -67,20 +63,17 @@ class Player(QWidget):
             self.mediaPlayer.set_nsobject(int(self.videoWidget.winId()))
 
         # Set window size and show
-        print(self.videoWidget.size())
-        self.setGeometry(100, 100, 555, 300)
+        self.setGeometry(200,200,640,360)
         self.show()
 
     def setsrc(self, src):
         # Function to open video file
-
         self.media = self.instance.media_new(src)
         self.create_ui()
         self.mediaPlayer.set_media(self.media)
-        #self.create_ui()
 
     def closeEvent(self, event):
-        pass
+        self.mediaPlayer.stop()
 
 
 class Main(QMainWindow):
@@ -105,24 +98,28 @@ class Main(QMainWindow):
         self.slider.sliderReleased.connect(self.sliderelease)
 
         self.client = Client2.Client()
-        self.listen()
 
         self.videowindow = Player()
 
         self.init_ui()
 
 
-
-
     def init_ui(self):
         self.setWindowTitle("Movie Magic")
 
-        openAction = QAction('&Load Movie', self)
-        openAction.triggered.connect(self.openfile)
+        self.openAction = QAction('&Load Movie', self)
+        self.openAction.triggered.connect(self.openfile)
+
+        serverconnect = QAction('&Connect', self)
+        serverconnect.triggered.connect(self.listen)
 
         menuBar = self.menuBar()
         fileMenu = menuBar.addMenu('&File')
-        fileMenu.addAction(openAction)
+        fileMenu.addAction(self.openAction)
+        self.openAction.setEnabled(False)
+
+        servermenu = menuBar.addMenu('&Server')
+        servermenu.addAction(serverconnect)
 
         self.setStyleSheet("background-color: #30ffac;")
 
@@ -134,6 +131,9 @@ class Main(QMainWindow):
 
         self.ppbutton.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.ppbutton.clicked.connect(self.client.sendpp)
+
+        self.ppbutton.setEnabled(False)
+        self.slider.setEnabled(False)
 
         layout.addWidget(self.ppbutton)
         layout.addWidget(self.slider)
@@ -158,11 +158,11 @@ class Main(QMainWindow):
     def openfile(self):
         # Function to open video file
         src = QFileDialog.getOpenFileName()
-        #self.videowindow.create_ui()
         self.videowindow.setsrc(src[0])
         self.videowindow.show()
         self.videowindow.mediaPlayer.play()
         self.client.requestsync()
+        self.enable()
 
     def pptoggle(self, state):
         if state == 'pause':
@@ -206,12 +206,30 @@ class Main(QMainWindow):
             self.pptoggle(t[1])
         elif t[0] == 't':
             self.settime(int(t[1]))
+        elif t[0] == 'q':
+            print('server disconnected')
+            self.disable()
+
+    def disable(self):
+        self.stoptime()
+        self.videowindow.mediaPlayer.set_pause(1)
+        self.ppbutton.setEnabled(False)
+        self.slider.setEnabled(False)
+        self.openAction.setEnabled(False)
+
+    def enable(self):
+        self.ppbutton.setEnabled(True)
+        self.slider.setEnabled(True)
 
     def listen(self):
-        listener = ThreadWorker(self.client.sock_listener)
-        listener.signals.finished.connect(self.thread_complete)
-        listener.signals.trigger.connect(self.handle_trigger)
-        self.threadpool.start(listener)
+        joined = self.client.start_connection()
+        if joined:
+            listener = ThreadWorker(self.client.sock_listener)
+            listener.signals.finished.connect(self.thread_complete)
+            listener.signals.trigger.connect(self.handle_trigger)
+            self.threadpool.start(listener)
+            self.openAction.setEnabled(True)
+
 
     def closeEvent(self, event):
         self.client.sel.close()
