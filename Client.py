@@ -1,85 +1,53 @@
-from PyQt5.QtWidgets import QWidget, QPushButton, QApplication
-from PyQt5.QtCore import QRunnable, QThreadPool, QObject, pyqtSignal
-import sys
-import socket
 import selectors
+import socket
+import time
 
-
-class ThreadSignals(QObject):
-    finished = pyqtSignal()
-    result = pyqtSignal(object)
-    progress = pyqtSignal(str)
-
-
-class ThreadWorker(QRunnable):
-    def __init__(self, fn, *args, **kwargs):
-        super(ThreadWorker, self).__init__()
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
-        self.signals = ThreadSignals()
-        self.kwargs['progress_callback'] = self.signals.progress
-
-    def run(self):
-        try:
-            result = self.fn(*self.args, **self.kwargs)
-            self.signals.result.emit(result)
-        finally:
-            self.signals.finished.emit()
-
-
-class GUI(QWidget):
-
+class Client:
     def __init__(self):
-        super().__init__()
-
-        self.threadpool = QThreadPool()
-        print('Multithreading with maximum %d threads' % self.threadpool.maxThreadCount())
-
-        self.initUI()
-
-        self.sel = selectors.DefaultSelector()
+        self.sel = None
+        self.connected = False
 
         # self.host, self.port = "173.79.60.161", 10000
         self.host, self.port = "127.0.0.1", 10000
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.start_connection()
-
-        worker = ThreadWorker(self.sock_listener)
-        worker.signals.result.connect(self.print_output)
-        worker.signals.finished.connect(self.thread_complete)
-        worker.signals.progress.connect(self.progress_fn)
-        self.threadpool.start(worker)
-
-
-    def initUI(self):
-
-        self.setGeometry(300, 300, 300, 220)
-        self.setWindowTitle('MovieMagic')
-
-        button = QPushButton('Ping', self)
-        button.setToolTip('Test echo response')
-        button.move(100, 70)
-        button.clicked.connect(self.on_click)
-
-        self.show()
+        self.sock = None
 
     def start_connection(self):
         addr = (self.host, self.port)
-        print("starting connection to", addr)
+        self.sel = selectors.DefaultSelector()
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setblocking(False)
         self.sock.connect_ex(addr)
-        events = selectors.EVENT_READ
-        self.sel.register(self.sock, events, self.delegate)
+        time.sleep(1)
+        try:
+            data = 'j'
+            self.sock.sendall(data.encode('utf-8'))
+            events = selectors.EVENT_READ
+            self.sel.register(self.sock, events, data=None)
+            self.connected = True
+        except:
+            print('Failed to join server')
+            self.connected = False
+
+
 
     def sock_listener(self, progress_callback):
-        print('listening')
         try:
             while True:
                 trigger = self.sel.select(timeout=None)
-                for key, mask in trigger:
-                    callback = key.data
-                    callback(key.fileobj, mask)
+                key, mask = trigger[0]
+                data = self.sock.recv(6)
+                if data:
+                    header = data.decode('utf-8')[:1]
+                    body = data.decode('utf-8')[-5:]
+                    passback = (header, body)
+                    progress_callback.emit(passback)
+                else:
+                    print('closing', key.fileobj)
+                    self.sel.unregister(key.fileobj)
+                    self.sock.close()
+                    passback = ('q','00000')
+                    progress_callback.emit(passback)
+                    break
         except KeyboardInterrupt:
             print("caught keyboard interrupt, exiting")
         except OSError:
@@ -87,34 +55,14 @@ class GUI(QWidget):
         finally:
             self.sel.close()
 
-    def delegate(self, conn, mask):
-        data = self.sock.recv(1000)  # Should be ready
-        if data:
-            print('recieved: {}'.format(data.decode('utf-8')))
-        else:
-            print('closing', conn)
-            self.sel.unregister(conn)
-            self.sock.close()
+    def sendpp(self):
+        data = 'p'
+        self.sock.sendall(data.encode('utf-8'))
 
-    def print_output(self, s):
-        if s:
-            print(s)
+    def sendtime(self, time):
+        data = 't{}'.format(str(time).zfill(5))
+        self.sock.sendall(data.encode('utf-8'))
 
-    def thread_complete(self):
-        print('Thread complete')
-
-    def progress_fn(self, n):
-        print(n)
-
-    def on_click(self):
-        data = 'Test'
-        print('sending: {}'.format(data))
-        self.sock.send(data.encode('utf-8'))
-
-    def closeEvent(self, event):
-        self.sel.close()
-
-
-app = QApplication(sys.argv)
-gui = GUI()
-sys.exit(app.exec_())
+    def requestsync(self):
+        data = 's'
+        self.sock.sendall(data.encode('utf-8'))

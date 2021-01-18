@@ -1,21 +1,22 @@
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QListWidget, \
-    QListWidgetItem, QTableWidget, QStyle, QSlider, QLabel, QAction, QFileDialog
-from PyQt5.QtGui import QPalette, QColor, QIcon, QPainter, QPen
-from PyQt5.QtCore import QSize, Qt, QThreadPool, QObject, pyqtSignal, QRunnable, QTime, QTimer
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,  QStyle, \
+    QSlider, QLabel, QAction, QFileDialog
+from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import Qt, QThreadPool, QObject, pyqtSignal, QRunnable, QTimer
 from PyQt5.QtMultimediaWidgets import QVideoWidget
-import Client2
+import client
 import sys
 import platform
 import vlc
 
 
 class ThreadSignals(QObject):
+    # Possible callbacks for worker threads
     finished = pyqtSignal()
-    #result = pyqtSignal(object)
     trigger = pyqtSignal(tuple)
 
 
 class ThreadWorker(QRunnable):
+    # Thread operator class
     def __init__(self, fn, *args, **kwargs):
         super(ThreadWorker, self).__init__()
         self.fn = fn
@@ -27,31 +28,30 @@ class ThreadWorker(QRunnable):
     def run(self):
         try:
             result = self.fn(*self.args, **self.kwargs)
-            #self.signals.result.emit(result)
         finally:
             self.signals.finished.emit()
 
 
 class Player(QWidget):
-    # Video GUI class
 
+    # Video viewing panel
     def __init__(self, parent=None):
         super(Player, self).__init__(parent)
 
+        # Creates VLC instance and a new media player within it
         self.instance = vlc.Instance()
         self.media = None
         self.mediaPlayer = self.instance.media_player_new()
 
+        # creates a place for the VLC instance to go
         self.videoWidget = QVideoWidget()
-
 
     def create_ui(self):
         # Set up GUI
 
-        # Creates GUI widget
         layout = QHBoxLayout()
         layout.addWidget(self.videoWidget)
-        layout.setContentsMargins(0,0,0,0)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
         # Links VLC object to a frame within the widget
@@ -63,7 +63,7 @@ class Player(QWidget):
             self.mediaPlayer.set_nsobject(int(self.videoWidget.winId()))
 
         # Set window size and show
-        self.setGeometry(200,200,640,360)
+        self.setGeometry(200, 200, 640, 360)
         self.show()
 
     def setsrc(self, src):
@@ -73,41 +73,44 @@ class Player(QWidget):
         self.mediaPlayer.set_media(self.media)
 
     def closeEvent(self, event):
+        # Pause on close
         self.mediaPlayer.stop()
 
 
 class Main(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.threadpool = QThreadPool()
-        print('Multithreading with maximum %d threads' % self.threadpool.maxThreadCount())
 
+        # Add ability to multi-thread
+        self.threadpool = QThreadPool()
+
+        # Add subclasses for client and viewer
+        self.client = client.Client()
+        self.videowindow = Player()
+
+        # Set media properties
         self.media = None
         self.playing = False
         self.volume = 80
+        self.time = 0
+        self.mlength = 7200
+
+        # Build internal clock
         self.clock = QTimer()
         self.clock.timeout.connect(self.tick)
-        self.mlength = 5400
-        self.time = 0
-        self.timer = QLabel('00:00')
 
+        # Set up GUI
+        self.timer = QLabel('00:00')
         self.videoWidget = QVideoWidget()
         self.ppbutton = QPushButton()
         self.slider = QSlider(Qt.Horizontal)
-        self.slider.setMaximum(self.mlength)
-        self.slider.setValue(0)
-        self.slider.sliderReleased.connect(self.sliderelease)
-
-        self.client = Client2.Client()
-
-        self.videowindow = Player()
-
         self.init_ui()
 
-
     def init_ui(self):
+        # Name window
         self.setWindowTitle("Movie Magic")
 
+        # Set menu bar options
         menuBar = self.menuBar()
         fileMenu = menuBar.addMenu('&File')
         servermenu = menuBar.addMenu('&Server')
@@ -128,9 +131,8 @@ class Main(QMainWindow):
         volumemenu.addAction(volumeup)
         volumemenu.addAction(volumedown)
 
+        # Build main window
         self.setStyleSheet("background-color: #30ffac;")
-
-
         widget = QWidget()
         widget.setStyleSheet(open('stylesheet.css').read())
 
@@ -139,6 +141,10 @@ class Main(QMainWindow):
 
         self.ppbutton.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.ppbutton.clicked.connect(self.client.sendpp)
+
+        self.slider.setMaximum(self.mlength)
+        self.slider.setValue(0)
+        self.slider.sliderReleased.connect(self.sliderelease)
 
         self.ppbutton.setEnabled(False)
         self.slider.setEnabled(False)
@@ -170,6 +176,7 @@ class Main(QMainWindow):
         self.show()
 
     def update_ui(self):
+        # updates timer to reflect Main timer value
         m, s = divmod(self.time, 60)
         h, m = divmod(m, 60)
         self.slider.setValue(self.time)
@@ -181,18 +188,18 @@ class Main(QMainWindow):
             self.timer.setText('{}:{}'.format(minstr, secstr))
 
     def volumeup(self):
+        # turns volume up 10%
         if self.videowindow.isVisible():
             self.volume += 10
             self.volumelabel.setText('Volume: {}%'.format(self.volume))
             self.videowindow.mediaPlayer.audio_set_volume(self.volume)
-            print(self.videowindow.mediaPlayer.audio_get_volume())
 
     def volumedown(self):
+        # turns volume down 10%
         if self.videowindow.isVisible():
             self.volume -= 10
             self.volumelabel.setText('Volume: {}%'.format(self.volume))
             self.videowindow.mediaPlayer.audio_set_volume(self.volume)
-            print(self.videowindow.mediaPlayer.audio_get_volume())
 
     def openfile(self):
         # Function to open video file
@@ -201,13 +208,15 @@ class Main(QMainWindow):
         self.videowindow.show()
         self.videowindow.mediaPlayer.play()
         if self.client.connected:
+            # Asks server for timestamp and play/pause
             self.client.requestsync()
+
             self.enable()
-            print(self.videowindow.mediaPlayer.audio_get_volume())
         else:
             self.videowindow.mediaPlayer.set_pause(1)
 
     def pptoggle(self, state):
+        # Sets play/pause to server input
         if state == 'pause':
             self.playing = False
             self.ppbutton.setIcon(QIcon(self.style().standardIcon(QStyle.SP_MediaPlay)))
@@ -218,33 +227,40 @@ class Main(QMainWindow):
             self.starttime()
 
     def sliderelease(self):
+        # Tells server to update time
         num = self.slider.value()
         self.client.sendtime(num)
 
     def tick(self):
+        # Updates Main time
         self.time += 1
         self.update_ui()
 
     def starttime(self):
+        # Starts main clock counting every second and plays video
         self.clock.start(1000)
         if self.videowindow:
             self.videowindow.mediaPlayer.set_pause(0)
 
     def stoptime(self):
+        # Stops main clock counting every second and pauses video
         self.clock.stop()
         if self.videowindow:
             self.videowindow.mediaPlayer.set_pause(1)
 
     def settime(self, num):
+        # Takes server input and updates Main clock and movie time
         self.time = num
         if self.videowindow:
             self.videowindow.mediaPlayer.set_time(num*1000)
         self.update_ui()
 
     def thread_complete(self):
+        # Calls out when a thread has finished executing
         print('Thread complete')
 
     def handle_trigger(self, t):
+        # Delegates server commands
         if t[0] == 'p':
             self.pptoggle(t[1])
         elif t[0] == 't':
@@ -254,6 +270,7 @@ class Main(QMainWindow):
             self.disable()
 
     def disable(self):
+        # Locks UI
         self.stoptime()
         self.videowindow.mediaPlayer.set_pause(1)
         self.ppbutton.setEnabled(False)
@@ -261,10 +278,12 @@ class Main(QMainWindow):
         self.openAction.setEnabled(False)
 
     def enable(self):
+        # Unlocks UI
         self.ppbutton.setEnabled(True)
         self.slider.setEnabled(True)
 
     def connect_server(self):
+        # Tries to connect to server
         self.client.start_connection()
         if self.client.connected:
             listener = ThreadWorker(self.client.sock_listener)
@@ -273,14 +292,16 @@ class Main(QMainWindow):
             self.threadpool.start(listener)
             self.serverlabel.setText('Server connected')
             self.enable()
+
+            # If a movie is on, it auto-syncs to server
             if self.videowindow.isVisible():
                 self.client.requestsync()
         else:
             self.serverlabel.setText('Server connection failed')
 
     def closeEvent(self, event):
+        # On close, make sure all selectors are shut down
         self.client.sel.close()
-        self.clock.on = False
 
 
 def main():
@@ -290,5 +311,4 @@ def main():
 
 
 if __name__ == '__main__':
-    src = "/Users/kennethlawson/Documents/Movies/Chinatown.1974.720p.HDTV.x264.YIFY.mp4"
     main()
