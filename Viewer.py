@@ -6,7 +6,7 @@ import vlc
 import platform
 import Client2
 from PyQt5.QtCore import QRunnable, QThreadPool, QObject, pyqtSignal, QEvent, Qt
-from PyQt5.QtWidgets import QApplication, QWidget, QAction, QMainWindow, QVBoxLayout, QPushButton
+from PyQt5.QtWidgets import QApplication, QWidget, QAction, QMainWindow, QVBoxLayout, QPushButton, QFileDialog
 from PyQt5.QtMultimediaWidgets import QVideoWidget
 
 
@@ -79,6 +79,9 @@ class Player(QMainWindow):
                 """)
 
         layout = QVBoxLayout()
+        btn = QPushButton('Button', self)
+        btn.clicked.connect(self.pause)
+        layout.addWidget(btn)
         layout.addWidget(self.videoWidget)
         window.setLayout(layout)
 
@@ -96,6 +99,8 @@ class Player(QMainWindow):
         self.setGeometry(100, 100, 555, 300)
         self.show()
 
+    def pause(self):
+        self.mediaPlayer.pause()
 
     def listen(self):
         listener = ThreadWorker(self.client.sock_listener)

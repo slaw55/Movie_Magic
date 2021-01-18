@@ -17,7 +17,8 @@ class Server:
         self.lsock.setblocking(False)
         self.sel.register(self.lsock, selectors.EVENT_READ, data=None)
 
-        self.playpause = 'play'
+        self.playpause = False
+        self.time = 0
 
         self.mainloop()
 
@@ -29,15 +30,21 @@ class Server:
         self.sel.register(conn, selectors.EVENT_READ, self.read)
 
     def read(self, conn, mask):
-        data = conn.recv(1000)  # Should be ready
-        if data:
-            if self.playpause == 'play':
-                self.playpause = 'pause'
-            elif self.playpause == 'pause':
-                self.playpause = 'play'
-            print('broadcasting', self.playpause)
+        header = conn.recv(1)  # Should be ready
+        if header:
+            if header.decode('utf-8') == 'p':
+                self.playpause = not self.playpause
+                payload = self.p_fn()
+            elif header.decode('utf-8') == 't':
+                body = conn.recv(5).decode('utf-8')
+                payload = self.t_fn(body)
+            elif header.decode('utf-8') == 's':
+                payload = self.p_fn()
+                conn.send(payload.encode('utf-8'))
+                payload = self.t_fn(str(self.time))
+                conn.send(payload.encode('utf-8'))
             for c in self.client_list:
-                c.send(self.playpause.encode('utf-8'))  # Hope it won't block
+                c.send(payload.encode('utf-8'))  # Hope it won't block
         else:
             print('closing', conn)
             self.sel.unregister(conn)
@@ -58,6 +65,19 @@ class Server:
             print("caught keyboard interrupt, exiting")
         finally:
             self.sel.close()
+
+    def p_fn(self):
+        if self.playpause:
+            payload = 'p0play'
+        else:
+            payload = 'ppause'
+        return payload
+
+    def t_fn(self, time):
+        self.time = int(time)
+        time = str(self.time).zfill(5)
+        payload = 't' + time
+        return payload
 
 
 mmserver = Server()
