@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QPushButton, QLabel, QListWidget, \
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QListWidget, \
     QListWidgetItem, QTableWidget, QStyle, QSlider, QLabel, QAction, QFileDialog
 from PyQt5.QtGui import QPalette, QColor, QIcon, QPainter, QPen
 from PyQt5.QtCore import QSize, Qt, QThreadPool, QObject, pyqtSignal, QRunnable, QTime, QTimer
@@ -84,6 +84,7 @@ class Main(QMainWindow):
 
         self.media = None
         self.playing = False
+        self.volume = 80
         self.clock = QTimer()
         self.clock.timeout.connect(self.tick)
         self.mlength = 5400
@@ -107,19 +108,25 @@ class Main(QMainWindow):
     def init_ui(self):
         self.setWindowTitle("Movie Magic")
 
-        self.openAction = QAction('&Load Movie', self)
-        self.openAction.triggered.connect(self.openfile)
-
-        serverconnect = QAction('&Connect', self)
-        serverconnect.triggered.connect(self.listen)
-
         menuBar = self.menuBar()
         fileMenu = menuBar.addMenu('&File')
-        fileMenu.addAction(self.openAction)
-        self.openAction.setEnabled(False)
-
         servermenu = menuBar.addMenu('&Server')
+        volumemenu = menuBar.addMenu('&Volume')
+
+        self.openAction = QAction('&Load Movie', self)
+        self.openAction.triggered.connect(self.openfile)
+        fileMenu.addAction(self.openAction)
+
+        serverconnect = QAction('&Connect', self)
+        serverconnect.triggered.connect(self.connect_server)
         servermenu.addAction(serverconnect)
+
+        volumeup = QAction('&Increase', self)
+        volumedown = QAction('&Decrease', self)
+        volumeup.triggered.connect(self.volumeup)
+        volumedown.triggered.connect(self.volumedown)
+        volumemenu.addAction(volumeup)
+        volumemenu.addAction(volumedown)
 
         self.setStyleSheet("background-color: #30ffac;")
 
@@ -128,6 +135,7 @@ class Main(QMainWindow):
         widget.setStyleSheet(open('stylesheet.css').read())
 
         layout = QHBoxLayout()
+        layout.setSpacing(8)
 
         self.ppbutton.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.ppbutton.clicked.connect(self.client.sendpp)
@@ -138,7 +146,24 @@ class Main(QMainWindow):
         layout.addWidget(self.ppbutton)
         layout.addWidget(self.slider)
         layout.addWidget(self.timer)
-        widget.setLayout(layout)
+
+        layout2 = QHBoxLayout()
+
+        self.serverlabel = QLabel('No server connected', self)
+        self.serverlabel.setStyleSheet("color: #9800DA")
+        self.volumelabel = QLabel('Volume: {}%'.format(self.volume), self)
+        self.volumelabel.setStyleSheet("color: #B38200")
+        self.volumelabel.setAlignment(Qt.AlignRight)
+
+        layout2.addWidget(self.serverlabel)
+        layout2.addWidget(self.volumelabel)
+
+        olayout = QVBoxLayout()
+        olayout.setSpacing(0)
+        olayout.addLayout(layout)
+        olayout.addLayout(layout2)
+
+        widget.setLayout(olayout)
         self.resize(500, 70)
 
         self.setCentralWidget(widget)
@@ -155,14 +180,32 @@ class Main(QMainWindow):
         else:
             self.timer.setText('{}:{}'.format(minstr, secstr))
 
+    def volumeup(self):
+        if self.videowindow.isVisible():
+            self.volume += 10
+            self.volumelabel.setText('Volume: {}%'.format(self.volume))
+            self.videowindow.mediaPlayer.audio_set_volume(self.volume)
+            print(self.videowindow.mediaPlayer.audio_get_volume())
+
+    def volumedown(self):
+        if self.videowindow.isVisible():
+            self.volume -= 10
+            self.volumelabel.setText('Volume: {}%'.format(self.volume))
+            self.videowindow.mediaPlayer.audio_set_volume(self.volume)
+            print(self.videowindow.mediaPlayer.audio_get_volume())
+
     def openfile(self):
         # Function to open video file
         src = QFileDialog.getOpenFileName()
         self.videowindow.setsrc(src[0])
         self.videowindow.show()
         self.videowindow.mediaPlayer.play()
-        self.client.requestsync()
-        self.enable()
+        if self.client.connected:
+            self.client.requestsync()
+            self.enable()
+            print(self.videowindow.mediaPlayer.audio_get_volume())
+        else:
+            self.videowindow.mediaPlayer.set_pause(1)
 
     def pptoggle(self, state):
         if state == 'pause':
@@ -207,7 +250,7 @@ class Main(QMainWindow):
         elif t[0] == 't':
             self.settime(int(t[1]))
         elif t[0] == 'q':
-            print('server disconnected')
+            self.serverlabel.setText('Server disconnected')
             self.disable()
 
     def disable(self):
@@ -221,15 +264,19 @@ class Main(QMainWindow):
         self.ppbutton.setEnabled(True)
         self.slider.setEnabled(True)
 
-    def listen(self):
-        joined = self.client.start_connection()
-        if joined:
+    def connect_server(self):
+        self.client.start_connection()
+        if self.client.connected:
             listener = ThreadWorker(self.client.sock_listener)
             listener.signals.finished.connect(self.thread_complete)
             listener.signals.trigger.connect(self.handle_trigger)
             self.threadpool.start(listener)
-            self.openAction.setEnabled(True)
-
+            self.serverlabel.setText('Server connected')
+            self.enable()
+            if self.videowindow.isVisible():
+                self.client.requestsync()
+        else:
+            self.serverlabel.setText('Server connection failed')
 
     def closeEvent(self, event):
         self.client.sel.close()

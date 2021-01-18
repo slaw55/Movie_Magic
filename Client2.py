@@ -4,26 +4,30 @@ import time
 
 class Client:
     def __init__(self):
-        self.sel = selectors.DefaultSelector()
+        self.sel = None
+        self.connected = False
 
         # self.host, self.port = "173.79.60.161", 10000
         self.host, self.port = "127.0.0.1", 10000
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock = None
 
     def start_connection(self):
         addr = (self.host, self.port)
+        self.sel = selectors.DefaultSelector()
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setblocking(False)
-        self.sock.connect_ex(addr)
+        constat = self.sock.connect_ex(addr)
+        print(constat)
         time.sleep(1)
         try:
             data = 'j'
             self.sock.sendall(data.encode('utf-8'))
             events = selectors.EVENT_READ
             self.sel.register(self.sock, events, data=None)
-            return True
+            self.connected = True
         except:
             print('Failed to join server')
-            return False
+            self.connected = False
 
 
 
