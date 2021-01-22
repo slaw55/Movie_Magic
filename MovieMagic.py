@@ -1,8 +1,9 @@
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,  QStyle, \
-    QSlider, QLabel, QAction, QFileDialog
-from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import Qt, QThreadPool, QObject, pyqtSignal, QRunnable, QTimer
-from PyQt5.QtMultimediaWidgets import QVideoWidget
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from PyQt5.QtMultimediaWidgets import *
+from PyQt5.QtMultimedia import *
+from PyQt5.QtNetwork import *
 import sys
 import platform
 import vlc
@@ -78,7 +79,6 @@ class Player(QWidget):
         # Pause on close
         self.mediaPlayer.stop()
 
-
 class Client:
     def __init__(self):
         self.sel = None
@@ -93,19 +93,24 @@ class Client:
         self.sel = selectors.DefaultSelector()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setblocking(False)
-        self.sock.connect_ex(addr)
-        time.sleep(1)
-        try:
-            data = 'j'
-            self.sock.sendall(data.encode('utf-8'))
-            events = selectors.EVENT_READ
-            self.sel.register(self.sock, events, data=None)
-            self.connected = True
-        except:
-            print('Failed to join server')
-            self.connected = False
+        conn = self.sock.connect_ex(addr)
+        if conn == 36:
+            time.sleep(0.1)
+            try:
+                data = 'j'
+                self.sock.sendall(data.encode('utf-8'))
+                events = selectors.EVENT_READ
+                self.sel.register(self.sock, events, data=None)
+                self.connected = True
+            except:
+                print('Failed to join server')
+                self.connected = False
 
-
+    def break_connection(self):
+        self.sel.unregister(self.sock)
+        self.sock.close()
+        self.sel.close()
+        self.connected = False
 
     def sock_listener(self, progress_callback):
         try:
@@ -122,6 +127,7 @@ class Client:
                     print('closing', key.fileobj)
                     self.sel.unregister(key.fileobj)
                     self.sock.close()
+                    self.connected = False
                     passback = ('q','00000')
                     progress_callback.emit(passback)
                     break
@@ -145,6 +151,49 @@ class Client:
         self.sock.sendall(data.encode('utf-8'))
 
 
+class Preferences(QDialog):
+    def __init__(self, parent=None):
+        super(Preferences, self).__init__(parent)
+
+
+        formGroupBox = QGroupBox("Server settings")
+        layout = QFormLayout()
+        self.host = QLineEdit(self)
+        self.port = QLineEdit(self)
+        self.portvalidator = QIntValidator(49152, 65535, self)
+        self.port.setValidator(self.portvalidator)
+        layout.addRow(QLabel("IP Address:"), self.host)
+        layout.addRow(QLabel("Port:"), self.port)
+        formGroupBox.setLayout(layout)
+
+        buttonBox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttonBox.accepted.connect(self.accept)
+        buttonBox.rejected.connect(self.reject)
+
+        mainLayout = QVBoxLayout()
+        mainLayout.addWidget(formGroupBox)
+        mainLayout.addWidget(buttonBox)
+        self.setLayout(mainLayout)
+
+        self.setGeometry(300, 300, 300, 50)
+
+        self.valid = False
+
+    def getInputs(self):
+        while self.valid == False:
+            portvalid = self.portvalidator.validate(self.port.text(), 0)
+            if portvalid[0] == 2:
+                self.valid = True
+            elif portvalid[0] == 1 or portvalid[0] == 3:
+                repeat = QMessageBox()
+                repeat.setText('Acceptable port ranges are between 49152 and 65535')
+                repeat.setWindowTitle("Port Invalid")
+                repeat.exec()
+                self.exec()
+        return (self.host.text(), int(self.port.text()))
+
+
+
 class Main(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -155,6 +204,7 @@ class Main(QMainWindow):
         # Add subclasses for client and viewer
         self.client = Client()
         self.videowindow = Player()
+        self.preference = Preferences()
 
         # Set media properties
         self.media = None
@@ -190,19 +240,29 @@ class Main(QMainWindow):
 
         serverconnect = QAction('&Connect', self)
         serverconnect.triggered.connect(self.connect_server)
+        self.serverreconnect = QAction('&Reconnect', self)
+        self.serverreconnect.triggered.connect(self.reconnect)
+        serverprefs = QAction('&IP/Port', self)
+        serverprefs.triggered.connect(self.serverpreferences)
         servermenu.addAction(serverconnect)
+        servermenu.addAction(self.serverreconnect)
+        servermenu.addAction(serverprefs)
+        self.serverreconnect.setEnabled(False)
 
-        volumeup = QAction('&Increase', self)
-        volumedown = QAction('&Decrease', self)
-        volumeup.triggered.connect(self.volumeup)
-        volumedown.triggered.connect(self.volumedown)
-        volumemenu.addAction(volumeup)
-        volumemenu.addAction(volumedown)
+
+        self.vupbutton = QAction('&Increase', self)
+        self.vdownbutton = QAction('&Decrease', self)
+        self.vupbutton.triggered.connect(self.volumeup)
+        self.vdownbutton.triggered.connect(self.volumedown)
+        volumemenu.addAction(self.vupbutton)
+        volumemenu.addAction(self.vdownbutton)
+        self.vupbutton.setEnabled(False)
+        self.vdownbutton.setEnabled(False)
 
         # Build main window
         self.setStyleSheet("background-color: #30ffac;")
         widget = QWidget()
-        widget.setStyleSheet(open('stylesheet.css').read())
+        # widget.setStyleSheet(open('stylesheet.css').read())
 
         layout = QHBoxLayout()
         layout.setSpacing(8)
@@ -242,6 +302,24 @@ class Main(QMainWindow):
 
         self.setCentralWidget(widget)
         self.show()
+
+    def serverpreferences(self):
+        self.disable()
+        if self.client.connected:
+            self.client.break_connection()
+        self.preference.host.setText(self.client.host)
+        self.preference.port.setText(str(self.client.port))
+        # self.preference.port.setText(self.client.port)
+        if self.preference.exec():
+            host, port = self.preference.getInputs()
+            self.client.host = host
+            self.client.port = port
+            self.connect_server()
+
+    def reconnect(self):
+        if self.client.connected == True:
+            self.client.break_connection()
+        self.connect_server()
 
     def update_ui(self):
         # updates timer to reflect Main timer value
@@ -307,19 +385,19 @@ class Main(QMainWindow):
     def starttime(self):
         # Starts main clock counting every second and plays video
         self.clock.start(1000)
-        if self.videowindow:
+        if self.videowindow.isVisible():
             self.videowindow.mediaPlayer.set_pause(0)
 
     def stoptime(self):
         # Stops main clock counting every second and pauses video
         self.clock.stop()
-        if self.videowindow:
+        if self.videowindow.isVisible():
             self.videowindow.mediaPlayer.set_pause(1)
 
     def settime(self, num):
         # Takes server input and updates Main clock and movie time
         self.time = num
-        if self.videowindow:
+        if self.videowindow.isVisible():
             self.videowindow.mediaPlayer.set_time(num*1000)
         self.update_ui()
 
@@ -335,6 +413,7 @@ class Main(QMainWindow):
             self.settime(int(t[1]))
         elif t[0] == 'q':
             self.serverlabel.setText('Server disconnected')
+            self.serverreconnect.setEnabled(False)
             self.disable()
 
     def disable(self):
@@ -344,11 +423,15 @@ class Main(QMainWindow):
         self.ppbutton.setEnabled(False)
         self.slider.setEnabled(False)
         self.openAction.setEnabled(False)
+        self.vupbutton.setEnabled(True)
+        self.vdownbutton.setEnabled(True)
 
     def enable(self):
         # Unlocks UI
         self.ppbutton.setEnabled(True)
         self.slider.setEnabled(True)
+        self.vupbutton.setEnabled(True)
+        self.vdownbutton.setEnabled(True)
 
     def connect_server(self):
         # Tries to connect to server
@@ -359,6 +442,7 @@ class Main(QMainWindow):
             listener.signals.trigger.connect(self.handle_trigger)
             self.threadpool.start(listener)
             self.serverlabel.setText('Server connected')
+            self.serverreconnect.setEnabled(True)
             self.enable()
 
             # If a movie is on, it auto-syncs to server
@@ -369,7 +453,8 @@ class Main(QMainWindow):
 
     def closeEvent(self, event):
         # On close, make sure all selectors are shut down
-        self.client.sel.close()
+        if self.client.sel:
+            self.client.sel.close()
 
 
 def main():
