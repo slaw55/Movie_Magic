@@ -84,17 +84,17 @@ class Client:
         self.sel = None
         self.connected = False
 
-        # self.host, self.port = "173.79.60.161", 10000
-        self.host, self.port = "127.0.0.1", 10000
+        self.host, self.port = "173.79.60.161", 55555
+        #self.host, self.port = "127.0.0.1", 10000
         self.sock = None
 
     def start_connection(self):
         addr = (self.host, self.port)
         self.sel = selectors.DefaultSelector()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.setblocking(False)
+        self.sock.settimeout(3)
         conn = self.sock.connect_ex(addr)
-        if conn == 36:
+        if conn == 0:
             time.sleep(0.1)
             try:
                 data = 'j'
@@ -152,14 +152,16 @@ class Client:
 
 
 class Preferences(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, host, port, parent=None):
         super(Preferences, self).__init__(parent)
-
+        self.addr = (host, port)
 
         formGroupBox = QGroupBox("Server settings")
         layout = QFormLayout()
         self.host = QLineEdit(self)
+        self.host.setText(host)
         self.port = QLineEdit(self)
+        self.port.setText(port)
         self.portvalidator = QIntValidator(49152, 65535, self)
         self.port.setValidator(self.portvalidator)
         layout.addRow(QLabel("IP Address:"), self.host)
@@ -179,18 +181,20 @@ class Preferences(QDialog):
 
         self.valid = False
 
+    def accept(self):
+        self.portvalid = self.portvalidator.validate(self.port.text(), 0)
+        self.portvalid = self.portvalidator.validate(self.port.text(), 0)
+        if self.portvalid[0] == 2:
+            self.addr = (self.host.text(), self.port.text())
+            QDialog.accept(self)
+        elif self.portvalid[0] == 1 or self.portvalid[0] == 3:
+            repeat = QMessageBox()
+            repeat.setText('Acceptable port ranges are between 49152 and 65535')
+            repeat.setWindowTitle("Port Invalid")
+            repeat.exec()
+
     def getInputs(self):
-        while self.valid == False:
-            portvalid = self.portvalidator.validate(self.port.text(), 0)
-            if portvalid[0] == 2:
-                self.valid = True
-            elif portvalid[0] == 1 or portvalid[0] == 3:
-                repeat = QMessageBox()
-                repeat.setText('Acceptable port ranges are between 49152 and 65535')
-                repeat.setWindowTitle("Port Invalid")
-                repeat.exec()
-                self.exec()
-        return (self.host.text(), int(self.port.text()))
+        return (self.addr[0], int(self.addr[1]))
 
 
 
@@ -204,7 +208,7 @@ class Main(QMainWindow):
         # Add subclasses for client and viewer
         self.client = Client()
         self.videowindow = Player()
-        self.preference = Preferences()
+        self.preference = None
 
         # Set media properties
         self.media = None
@@ -260,7 +264,7 @@ class Main(QMainWindow):
         self.vdownbutton.setEnabled(False)
 
         # Build main window
-        self.setStyleSheet("background-color: #30ffac;")
+        self.setStyleSheet("background-color: #008080;")
         widget = QWidget()
         # widget.setStyleSheet(open('stylesheet.css').read())
 
@@ -284,9 +288,9 @@ class Main(QMainWindow):
         layout2 = QHBoxLayout()
 
         self.serverlabel = QLabel('No server connected', self)
-        self.serverlabel.setStyleSheet("color: #9800DA")
+        self.serverlabel.setStyleSheet("color: #ff3000")
         self.volumelabel = QLabel('Volume: {}%'.format(self.volume), self)
-        self.volumelabel.setStyleSheet("color: #B38200")
+        self.volumelabel.setStyleSheet("color: #ffe502")
         self.volumelabel.setAlignment(Qt.AlignRight)
 
         layout2.addWidget(self.serverlabel)
@@ -303,15 +307,13 @@ class Main(QMainWindow):
         self.setCentralWidget(widget)
         self.show()
 
+
     def serverpreferences(self):
-        self.disable()
-        if self.client.connected:
-            self.client.break_connection()
-        self.preference.host.setText(self.client.host)
-        self.preference.port.setText(str(self.client.port))
-        # self.preference.port.setText(self.client.port)
-        if self.preference.exec():
-            host, port = self.preference.getInputs()
+        preference = Preferences(self.client.host, str(self.client.port))
+        if preference.exec():
+            if self.client.connected:
+                self.client.break_connection()
+            host, port = preference.getInputs()
             self.client.host = host
             self.client.port = port
             self.connect_server()
@@ -353,13 +355,21 @@ class Main(QMainWindow):
         self.videowindow.setsrc(src[0])
         self.videowindow.show()
         self.videowindow.mediaPlayer.play()
+        # for some reason this buffer time is needed.  Otherwise length returns 0
+        time.sleep(1)
+        self.mlength = int(vlc.libvlc_media_player_get_length(self.videowindow.mediaPlayer) / 1000)
+        if self.mlength > 0:
+            self.slider.setMaximum(self.mlength)
+        else:
+            # on error default to 2 hours
+            self.mlength = 7200
         if self.client.connected:
             # Asks server for timestamp and play/pause
             self.client.requestsync()
-
             self.enable()
         else:
             self.videowindow.mediaPlayer.set_pause(1)
+
 
     def pptoggle(self, state):
         # Sets play/pause to server input

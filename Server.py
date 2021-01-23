@@ -5,8 +5,8 @@ import selectors
 class Server:
     def __init__(self):
         self.sel = selectors.DefaultSelector()
-        # self.host, self.port = "192.168.1.156", 10000
-        self.host, self.port = "127.0.0.1", 10000
+        self.host, self.port = "192.168.1.156", 55555
+        #self.host, self.port = "127.0.0.1", 10000
         self.client_list = []
         self.lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # Avoid bind() exception: OSError: [Errno 48] Address already in use
